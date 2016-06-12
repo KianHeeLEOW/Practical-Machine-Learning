@@ -1,0 +1,122 @@
+---
+title: "Practical Machine Learning Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement. A group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Data Source
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. The information has been generously provided for use use in this cousera course by the authors, Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. They have allowed the use of their paper "Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+
+#### Data Preprocessing
+We clean up near zero variance features, columns with missing values and descriptive fields.
+We further split the training data into a training set and a validation set so that we can validate our model.
+
+
+
+```{r}
+library(caret)
+# load data
+downloadcsv <- function(url, nastrings) {
+    temp <- tempfile()
+    download.file(url, temp)
+    data <- read.csv(temp, na.strings = nastrings)
+    unlink(temp)
+    return(data)
+}
+
+trainurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+training <- downloadcsv(trainurl, c("", "NA", "#DIV/0!"))
+
+testurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+testing <- downloadcsv(testurl, c("", "NA", "#DIV/0!"))
+
+training <- training[, 6:dim(training)[2]]
+
+treshold <- dim(training)[1] * 0.95
+#Remove columns with more than 95% of NA or "" values
+goodColumns <- !apply(training, 2, function(x) sum(is.na(x)) > treshold  || sum(x=="") > treshold)
+
+training <- training[, goodColumns]
+
+badColumns <- nearZeroVar(training, saveMetrics = TRUE)
+
+training <- training[, badColumns$nzv==FALSE]
+
+training$classe = factor(training$classe)
+
+#Partition rows into training and crossvalidation
+inTrain <- createDataPartition(training$classe, p = 0.6)[[1]]
+crossv <- training[-inTrain,]
+training <- training[ inTrain,]
+inTrain <- createDataPartition(crossv$classe, p = 0.75)[[1]]
+crossv_test <- crossv[ -inTrain,]
+crossv <- crossv[inTrain,]
+
+testing <- testing[, 6:dim(testing)[2]]
+testing <- testing[, goodColumns]
+testing$classe <- NA
+testing <- testing[, badColumns$nzv==FALSE]
+```
+### Model Train
+
+We use random forest as our model as implemented in the randomForest package by Breiman's random forest algorithm (based on Breiman and Cutler's original Fortran code).
+```{r}
+
+library(randomForest)
+#Train Random Forest
+#mod1 <- train(classe ~ ., data=training, method="rf")
+rfModel <- randomForest(classe ~ ., data = training, importance = TRUE, ntrees = 10)
+
+#pred1 <- predict(mod1, crossv)
+ptraining <- predict(rfModel, training)
+```
+
+### Model Validation
+
+Let us now test our model performance on the training set itself and the cross validation set.
+
+```{r}
+#show confusion matrices
+#confusionMatrix(pred1, crossv$classe)
+print(confusionMatrix(ptraining, training$classe))
+```
+
+The model performs well against the training set, We shall cross validate the performance against validation set and see if we have avoided overfitting.
+
+```{r}
+#Cross Validate
+pvalidation <- predict(rfModel, crossv)
+print(confusionMatrix(pvalidation, crossv$classe))
+#out-of-sample error
+pvalidation_oos <- predict(rfModel, crossv_test)
+#pred3 <- predict(mod3, crossv_test)
+accuracy <- sum(pvalidation_oos == crossv_test$classe) / length(pvalidation_oos)
+accuracy
+
+```
+The cross validation accuracy is 99.6% and the out-of-sample error is only 0.4% so our model performs rather good.
+
+### Test set prediction
+The prediction of our algorithm for the test set is:
+```{r}
+ptest <- predict(rfModel, testing)
+ptest
+```
+
